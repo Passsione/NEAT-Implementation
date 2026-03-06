@@ -1,0 +1,64 @@
+# ==============================================================================
+#  Evolution Simulation - GPU-Ready Requirements
+# ==============================================================================
+#
+#  Install (CPU only):
+#    pip install -r requirements.txt
+#
+#  Install (NVIDIA GPU / CUDA 12.x):
+#    pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu121
+#
+#  Install (NVIDIA GPU / CUDA 11.8):
+#    pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu118
+#
+#  Verify GPU is available after install:
+#    python -c "import torch; print(torch.cuda.is_available())"
+#    python -c "import cupy; cupy.show_config()"
+# ==============================================================================
+
+
+# -- core scientific stack -----------------------------------------------------
+numpy
+scipy
+
+# -- GPU-accelerated array computing (drop-in numpy replacement on CUDA) -------
+# CuPy: swap np -> cp for GPU speedups on large population fitness evaluation
+# Install the correct build for your CUDA version:
+#   CUDA 12.x:  cupy-cuda12x
+#   CUDA 11.8:  cupy-cuda11x
+#   ROCm 5.7:   cupy-rocm-5-0
+# Uncomment the one matching your system:
+# cupy-cuda12x
+# cupy-cuda11x
+
+# -- GPU deep learning backend (optional - enables torch-based fitness fns) ----
+# CPU-only torch is included by default; override with --extra-index-url above
+# for the CUDA-enabled build.
+torch
+torchvision
+
+# -- JIT compilation - accelerates pure Python fitness loops on CPU/GPU --------
+numba
+
+# -- evolutionary algorithm toolkit --------------------------------------------
+deap
+
+# -- data handling -------------------------------------------------------------
+pandas
+h5py
+
+# -- visualisation -------------------------------------------------------------
+matplotlib
+plotly
+pygame
+
+# -- parallelism / multi-GPU ---------------------------------------------------
+joblib
+ray
+
+# -- biology / genetics (optional) ---------------------------------------------
+biopython
+
+# -- utilities -----------------------------------------------------------------
+tqdm
+pyyaml
