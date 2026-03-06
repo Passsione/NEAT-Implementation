@@ -111,8 +111,8 @@ class Network:
 
         # eval order: outputs + hidden, inputs are pre-loaded separately
         # We don't topologically sort — recurrent nets evaluate all nodes each pass
-        non_input = [nid for nid, n in genome.nodes.items()
-                     if n.node_type != NODE_INPUT]
+        # non_input = [nid for nid, n in genome.nodes.items()
+        #              if n.node_type != NODE_INPUT]
 
         # put outputs last for clarity (doesn't affect correctness)
         hidden  = [nid for nid, n in genome.nodes.items() if n.node_type == NODE_HIDDEN]

@@ -1,15 +1,9 @@
 """
 run.py - Configure and run your NEAT simulation
 =================================================
-This is the only file you need to edit.
-
-Two examples are included:
-  1. XOR  - the classic NEAT benchmark (run as-is to verify everything works)
-  2. YOUR FITNESS FUNCTION - template for plugging in your own task
-
-To use your own task, replace `my_fitness_fn` with whatever evaluation
-logic you need. The function receives a Genome and must return a float
-(higher = better).
+MODE = "train"      silent training, no window
+MODE = "watch"      evolve with live visualiser each generation
+MODE = "watch_only" watch a random population, no evolution
 """
 
 import numpy as np
@@ -17,50 +11,31 @@ from neat import NEATConfig, NEATSimulator
 from neat_network import Network
 from neat_genome import Genome
 
+MODE = "watch"   # "train" | "watch" | "watch_only"
+
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  EXAMPLE 1: XOR (classic NEAT benchmark — delete when done)
+#  YOUR FITNESS FUNCTION
 # ══════════════════════════════════════════════════════════════════════════════
+# Inputs:  observation from your environment (size = cfg.n_inputs)
+# Outputs: network actions              (size = cfg.n_outputs)
+# Returns: float — higher is better
 
-XOR_INPUTS  = [[0, 0], [0, 1], [1, 0], [1, 1]]
-XOR_TARGETS = [0,       1,      1,      0     ]
-
-def xor_fitness(genome: Genome) -> float:
+def my_fitness_fn(genome: Genome) -> float:
+    from visualiser import AgentEnv
+    import pygame
     net = Network.from_genome(genome)
-    error = 0.0
-    for inputs, target in zip(XOR_INPUTS, XOR_TARGETS):
-        net.reset()
-        output = net.activate(inputs, n_passes=2)[0]
-        error += (output - target) ** 2
-    return 4.0 - error   # max fitness = 4.0
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  EXAMPLE 2: YOUR CUSTOM FITNESS FUNCTION
-# ══════════════════════════════════════════════════════════════════════════════
-#
-# Replace the body of this function with your own evaluation logic.
-# The network is a recurrent RNN — call net.reset() between episodes,
-# then net.activate([...]) for each timestep.
-#
-# Return a float. Higher = better.
-#
-# def my_fitness_fn(genome: Genome) -> float:
-#     net = Network.from_genome(genome)
-#
-#     total_reward = 0.0
-#
-#     for episode in range(5):
-#         net.reset()           # clear recurrent state between episodes
-#         observation = [0.0, 0.0]   # replace with your initial state
-#
-#         for step in range(100):
-#             action = net.activate(observation)
-#             # ... apply action, get next observation and reward ...
-#             # total_reward += reward
-#             pass
-#
-#     return total_reward
+    env = AgentEnv(np.random.default_rng(0), goals=[], obstacles=[])
+    obs = env.reset()
+    net.reset()
+    total = 0.0
+    for _ in range(200):
+        action = net.activate(obs, n_passes=2)
+        obs, reward, done = env.step(action)
+        total += reward
+        if done:
+            break
+    return total
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -68,48 +43,37 @@ def xor_fitness(genome: Genome) -> float:
 # ══════════════════════════════════════════════════════════════════════════════
 
 cfg = NEATConfig(
-    # ── network ───────────────────────────────────────────────────────────────
-    n_inputs  = 2,              # must match your fitness function's input size
-    n_outputs = 1,              # must match your fitness function's output size
-    output_activation   = "sigmoid",   # sigmoid | tanh | relu | identity | ...
-    initial_connection  = "partial",      # "full" | "partial" | "none"
-    allow_recurrent     = True,        # allow looping / recurrent connections
+    n_inputs  = 6,          # must match env observation size
+    n_outputs = 2,          # must match env action size
+    output_activation  = "sigmoid",
+    initial_connection = "partial",
+    allow_recurrent    = True,
 
-    # ── population ────────────────────────────────────────────────────────────
-    population_size     = 150,
-    elitism_per_species = 1,           # champions skip mutation
+    population_size     = 250,
+    elitism_per_species = 1,
 
-    # ── mutation ──────────────────────────────────────────────────────────────
-    weight_mutate_rate    = 0.8,       # prob each weight is mutated
-    weight_replace_rate   = 0.1,       # prob of full replacement vs perturbation
+    weight_mutate_rate    = 0.8,
+    weight_replace_rate   = 0.1,
     weight_perturb_std    = 0.3,
     bias_mutate_rate      = 0.3,
-    add_connection_rate   = 0.05,      # structural: new connection
-    add_node_rate         = 0.03,      # structural: split connection with new node
-    toggle_rate           = 0.01,      # enable/disable a connection
-    activation_mutate_rate = 0.01,     # change a hidden node's activation fn
+    add_connection_rate   = 0.05,
+    add_node_rate         = 0.03,
+    toggle_rate           = 0.01,
+    activation_mutate_rate = 0.01,
 
-    # ── crossover ─────────────────────────────────────────────────────────────
-    crossover_rate    = 0.75,
-    disable_gene_prob = 0.75,          # prob to disable if disabled in either parent
+    crossover_rate     = 0.75,
+    disable_gene_prob  = 0.75,
 
-    # ── speciation ────────────────────────────────────────────────────────────
-    compatibility_threshold = 3.0,     # lower = more species, higher = fewer
-    c1 = 1.0,                          # excess gene coefficient
-    c2 = 1.0,                          # disjoint gene coefficient
-    c3 = 0.4,                          # weight difference coefficient
-    stagnation_limit  = 15,            # species removed after N gens without improvement
-    survival_ratio    = 0.5,           # fraction of each species kept each gen
+    compatibility_threshold = 3.0,
+    stagnation_limit   = 15,
+    survival_ratio     = 0.5,
 
-    # ── stopping ──────────────────────────────────────────────────────────────
-    max_generations   = 300,
-    fitness_threshold = 3.9,           # stop when best fitness >= this (XOR: ~3.9)
+    max_generations    = 200,
+    fitness_threshold  = None,
 
-    # ── logging ───────────────────────────────────────────────────────────────
-    verbose     = True,
-    print_every = 10,
-
-    seed = 42,
+    verbose      = True,
+    print_every  = 1,
+    seed         = 42,
 )
 
 
@@ -118,19 +82,76 @@ cfg = NEATConfig(
 # ══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    # swap xor_fitness for my_fitness_fn once you have your own task
-    sim    = NEATSimulator(cfg, fitness_fn=xor_fitness)
-    result = sim.run()
 
-    print("\n" + result.summary())
+    if MODE == "train":
+        sim    = NEATSimulator(cfg, fitness_fn=my_fitness_fn)
+        result = sim.run()
+        print(result.summary())
+        result.plot(save_path="neat_results.png", show=True)
 
-    # ── verify the best network on XOR ───────────────────────────────────────
-    print("\nBest network XOR outputs:")
-    net = result.best_network()
-    for inputs, target in zip(XOR_INPUTS, XOR_TARGETS):
-        net.reset()
-        out = net.activate(inputs)[0]
-        print(f"  {inputs} -> {out:.4f}  (target {target})  "
-              f"{'OK' if abs(out - target) < 0.5 else 'FAIL'}")
+    elif MODE == "watch_only":
+        from visualiser import NEATVisualiser
+        from neat_genome import make_genome, InnovationTracker
+        tracker = InnovationTracker()
+        rng     = np.random.default_rng(cfg.seed)
+        pop = [make_genome(i + 1, cfg.n_inputs, cfg.n_outputs,
+                           tracker, rng, cfg.output_activation,
+                           cfg.initial_connection)
+               for i in range(cfg.population_size)]
+        vis = NEATVisualiser(pop, n_inputs=cfg.n_inputs, n_outputs=cfg.n_outputs,
+                             steps_per_gen=300, fps_target=60)
+        vis.run()
 
-    result.plot(save_path="neat_results.png", show=False)
+    elif MODE == "watch":
+        from visualiser import NEATVisualiser
+        from neat_genome import make_genome, InnovationTracker
+
+        tracker    = InnovationTracker()
+        rng        = np.random.default_rng(cfg.seed)
+        population = [make_genome(i + 1, cfg.n_inputs, cfg.n_outputs,
+                                  tracker, rng, cfg.output_activation,
+                                  cfg.initial_connection)
+                      for i in range(cfg.population_size)]
+
+        vis = NEATVisualiser(
+            population,
+            n_inputs      = cfg.n_inputs,
+            n_outputs     = cfg.n_outputs,
+            steps_per_gen = 300,
+            fps_target    = 60,
+        )
+
+        sim       = NEATSimulator(cfg, fitness_fn=my_fitness_fn)
+        best_fit  = -np.inf
+        best_ever = None
+
+        for gen in range(cfg.max_generations):
+            vis.update_population(population)
+            rewards = vis.run_generation(gen)
+
+            for genome, r in zip(population, rewards):
+                genome.fitness = r
+
+            gen_best = max(population, key=lambda g: g.fitness)
+            if gen_best.fitness > best_fit:
+                best_fit  = gen_best.fitness
+                best_ever = gen_best.copy(gen_best.genome_id)
+
+            print(f"[Gen {gen+1:>3}]  best={gen_best.fitness:.4f}"
+                  f"  mean={np.mean(rewards):.4f}"
+                  f"  nodes={len(gen_best.nodes)}"
+                  f"  conns={len(gen_best.connections)}")
+
+            import pygame
+            if not pygame.get_init() or not pygame.display.get_surface():
+                break
+
+            if cfg.fitness_threshold and best_fit >= cfg.fitness_threshold:
+                break
+
+            tracker.new_generation()
+            sim.speciator.speciate(population, rng)
+            sim.speciator.cull(cfg.survival_ratio)
+            population = sim._reproduce(population)
+
+        print(f"\nDone. Best fitness: {best_fit:.4f}")
