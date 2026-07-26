@@ -55,6 +55,7 @@ import numpy as np
 import pygame
 import pygame.gfxdraw
 
+from sound_system import SoundAgentEnv, SoundField, draw_sound_field, SOUND_INPUTS, SOUND_OUTPUTS
 from neat_genome import Genome, NODE_INPUT, NODE_OUTPUT, NODE_HIDDEN
 from neat_network import Network
 
@@ -146,6 +147,14 @@ class AgentEnv:
         pt = pygame.Rect(int(nx) - 3, int(ny) - 3, 6, 6)
         if not any(pt.colliderect(o) for o in self.obstacles):
             self.x, self.y = nx, ny
+            
+        else:
+            pass
+            # dxr = -(action[0] - 0.5) * 2.0 * speed 
+            # dyr = -(action[1] - 0.5) * 2.0 * speed / 2 if len(action) > 1 else 0.0
+
+            # self.x, self.y = float(np.clip(self.x + dxr, 0, self.WORLD_W)), float(np.clip(self.y + dyr, 0, self.WORLD_H))
+            
 
         self.trail_x.append(self.x)
         self.trail_y.append(self.y)
@@ -189,6 +198,7 @@ class AgentEnv:
         return obSpace
 
 
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  AGENT WRAPPER
 # ══════════════════════════════════════════════════════════════════════════════
@@ -197,7 +207,7 @@ class AgentEnv:
 class Agent:
     genome:           Genome
     network:          Network
-    env:              AgentEnv
+    env:              SoundAgentEnv
     obs:              List[float]       = field(default_factory=list)
     reward:           float             = 0.0
     alive:            bool              = True
@@ -222,8 +232,8 @@ class NEATVisualiser:
     seed          : rng seed
     """
     AGENT_R  = 5
-    WORLD_W  = AgentEnv.WORLD_W + 2 * AGENT_R
-    WORLD_H  = AgentEnv.WORLD_H + 2 * AGENT_R
+    WORLD_W  = SoundAgentEnv.WORLD_W + 2 * AGENT_R
+    WORLD_H  = SoundAgentEnv.WORLD_H + 2 * AGENT_R
     INSP_W   = 400
     BOT_H    = 90
     WIN_W    = WORLD_W + INSP_W   
@@ -233,6 +243,7 @@ class NEATVisualiser:
     def __init__(
         self,
         population:    List[Genome],
+        _field:         SoundField,
         n_inputs:      int = 4,
         n_outputs:     int = 2,
         steps_per_gen: int = 300,
@@ -245,6 +256,7 @@ class NEATVisualiser:
         self.steps_per_gen = steps_per_gen
         self.fps_target    = fps_target
         self.rng           = np.random.default_rng(seed)
+        self.field         = _field
 
         self.step       = 0
         self.generation = 0
@@ -252,6 +264,8 @@ class NEATVisualiser:
         self.speed      = 1
         self.show_trails = True
         self.show_goals  = True
+
+        self.mic_on = False  # Press 'M' to toggle
 
         self.goals:     List[Tuple[float, float]] = []
         self.obstacles: List[pygame.Rect]         = []
@@ -282,20 +296,22 @@ class NEATVisualiser:
         self.agents = []
         for genome in self.population:
             net = Network.from_genome(genome)
-            env = AgentEnv(
+            env = SoundAgentEnv(
                 np.random.default_rng(int(self.rng.integers(0, 2**31))),
-                self.goals, self.obstacles,
+                self.goals, self.obstacles, field=self.field, genome_id=genome.genome_id
             )
             obs = env.reset()
             net.reset()
             self.agents.append(Agent(
                 genome=genome, network=net, env=env,
-                obs=obs, last_inputs=list(obs),
+                obs=obs, 
+                last_inputs=list(obs),
                 last_outputs=[0.0] * self.n_outputs,
             ))
 
     def update_population(self, population: List[Genome]):
         self.population = population
+        self.field.reset()
         self._build_agents()
         self.step = 0
 
@@ -309,10 +325,12 @@ class NEATVisualiser:
             if not self.paused:
                 for _ in range(self.speed):
                     self._tick()
+                    self._listen_at_mouse()
             if self.step >= self.steps_per_gen:
                 rewards = [a.reward for a in self.agents]
                 self.gen_best_history.append(max(rewards) if rewards else 0.0)
                 self.generation += 1
+                self.field.reset()
                 self._build_agents()
                 self.step = 0
             self._draw()
@@ -322,6 +340,7 @@ class NEATVisualiser:
     def run_generation(self, generation: int) -> List[float]:
         """Integrated mode — call from your NEAT loop each generation."""
         self.generation = generation
+        self.field.reset()
         self._build_agents()
         self.step = 0
 
@@ -331,6 +350,7 @@ class NEATVisualiser:
             if not self.paused:
                 for _ in range(self.speed):
                     self._tick()
+                    self._listen_at_mouse()
                     if self.step >= self.steps_per_gen:
                         break
             self._draw()
@@ -346,6 +366,7 @@ class NEATVisualiser:
         if self.step >= self.steps_per_gen:
             return
         self.step += 1
+        self.field.step(1.0 / 60.0)
         for agent in self.agents:
             if not agent.alive:
                 continue
@@ -380,12 +401,13 @@ class NEATVisualiser:
         k = ev.key
         if k == pygame.K_q:  return False
         if k == pygame.K_SPACE:   self.paused = not self.paused
-        if k == pygame.K_r:       self._build_agents(); self.step = 0
-        if k == pygame.K_RIGHT and self.paused: self._tick()
+        if k == pygame.K_r:       self.field.reset(); self._build_agents(); self.step = 0
+        if k == pygame.K_RIGHT and self.paused: self._tick(); self._listen_at_mouse()
         if k in (pygame.K_PLUS, pygame.K_EQUALS): self.speed = min(self.speed * 2, 16)
         if k == pygame.K_MINUS:   self.speed = max(self.speed // 2, 1)
         if k == pygame.K_t:       self.show_trails = not self.show_trails
         if k == pygame.K_g:       self.show_goals  = not self.show_goals
+        if k == pygame.K_m:       self.mic_on = not self.mic_on; print(f"Microphone: {'ON' if self.mic_on else 'OFF'}")
         return True
 
     def _on_click(self, ev):
@@ -416,7 +438,7 @@ class NEATVisualiser:
                 if obs.collidepoint(mx, my):
                     self.obstacles.pop(i); return
             self.obstacles.append(pygame.Rect(mx - 20, my - 20, 40, 40))
-
+    
     def _on_motion(self, ev):
         mx, my = ev.pos
         if self.dragging and mx < self.WORLD_W:
@@ -427,6 +449,34 @@ class NEATVisualiser:
             self.hovered_agent = self._agent_at(mx, my, radius=16)
         else:
             self.hovered_agent = None
+
+    def _listen_at_mouse(self):
+        if not self.mic_on:
+            return
+        
+        # Get mouse world coordinates
+        mx, my = pygame.mouse.get_pos()
+        
+        # Generate 1 frame of audio (1/60th of a second)
+        sample_rate = 44100
+        duration = 1.0 / 60.0
+        t_samples = np.linspace(self.field.sim_time, 
+                                self.field.sim_time + duration, 
+                                int(sample_rate * duration))
+        
+        # Sample the field at the mouse's x, y
+        wave = self.field.sample(mx, my)
+        
+        # Standardize for Pygame (16-bit PCM)
+        # Ensure it doesn't clip your speakers!
+        wave = np.clip(wave * 0.5, -1, 1) 
+        mono_data = (wave * 32767).astype(np.int16)
+        # Duplicate the mono channel for Stereo (2nd dimension)
+        audio_data = np.column_stack((mono_data, mono_data))
+        
+        # Play immediately (Mono)
+        sound = pygame.sndarray.make_sound(audio_data)
+        sound.play()
 
     def _agent_at(self, mx, my, radius=12) -> Optional[Agent]:
         best_d, best_a = radius, None
@@ -458,6 +508,7 @@ class NEATVisualiser:
         self._draw_obstacles(surf)
         if self.show_trails:   self._draw_trails(surf)
         self._draw_agents(surf)
+        draw_sound_field(surf, self.field)  
         self.screen.blit(surf, (0, 0))
         pygame.draw.rect(self.screen, C["border"],
                          (0, 0, self.WORLD_W, self.WORLD_H), 1)
@@ -517,11 +568,30 @@ class NEATVisualiser:
         # non-focused first, focused on top
         order   = sorted(self.agents, key=lambda a: a is focus)
         for agent in order:
-            self._draw_dot(surf, agent, max_r, agent is focus)
+            # self._draw_dot(surf, agent, max_r, agent is focus)
+            self._draw_agent(surf, agent)
+
+    def _draw_agent(self, surface, agent: Agent):
+        # Draw body
+        
+        pygame.draw.circle(surface, (*C["purple"], 80), (int(agent.env.x), int(agent.env.y)), agent.env.head_radius)
+        
+        # Draw Ears (Binaural Visualisation)
+        # Positions calculated in AgentEnv.step()
+        for ear_pos in [agent.env.left_ear, agent.env.right_ear]:
+            pygame.draw.circle(surface, (200, 200, 200), 
+                            (int(ear_pos[0]), int(ear_pos[1])), 3)
+        
+        # Draw "Vocal Pulse" (Visualizing the Resonator)
+        # if agent.env.emitter.curr_amp > 0.1:
+            
+        #     pulse_r = agent.env.head_radius + (agent.env.emitter.curr_amp * 15)
+        #     pygame.draw.circle(surface, (255, 255, 255), 
+        #                     (int(agent.env.x), int(agent.env.y)), int(pulse_r), 1)
 
     def _draw_dot(self, surf, agent, max_r, focused):
         x, y   = int(agent.env.x), int(agent.env.y)
-        r_norm = agent.reward / max(max_r, 1e-9)
+        r_norm = float(np.clip(agent.reward / max(max_r, 1e-9), 0.0, 1.0))  # ← clamp
         is_best = agent.reward >= max_r - 1e-9
 
         if focused:
@@ -536,7 +606,7 @@ class NEATVisualiser:
         else:
             h   = 0.55 + r_norm * 0.28
             rgb = colorsys.hsv_to_rgb(h, 0.85, 0.92)
-            col = tuple(int(c * 255) for c in rgb)
+            col = tuple(max(0, min(255, int(c * 255))) for c in rgb)  # ← clamp each channel
             r   = self.AGENT_R
 
         pygame.gfxdraw.filled_circle(surf, x, y, r, col)
@@ -713,7 +783,7 @@ class NEATVisualiser:
         surf.blit(edge_surf, (0, 0))
 
         # nodes
-        NODE_R = 10
+        NODE_R = 5
         for nid, (nx2, ny2) in node_pos.items():
             node    = genome.nodes[nid]
             act_val = float(acts.get(nid, 0.0))

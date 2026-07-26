@@ -64,14 +64,17 @@ NODE_INPUT   = "input"
 NODE_OUTPUT  = "output"
 NODE_HIDDEN  = "hidden"
 
+def _clip(x, lo=-60.0, hi=60.0):
+    return float(np.clip(x, lo, hi))
+
 ACTIVATIONS = {
-    "sigmoid":  lambda x: 1 / (1 + np.exp(-np.clip(x, -60, 60))),
-    "tanh":     np.tanh,
-    "relu":     lambda x: np.maximum(0, x),
-    "leaky":    lambda x: np.where(x >= 0, x, 0.01 * x),
-    "identity": lambda x: x,
-    "gauss":    lambda x: np.exp(-x**2),
-    "sin":      np.sin,
+    "sigmoid":  lambda x: 1.0 / (1.0 + np.exp(-_clip(x))),
+    "tanh":     lambda x: float(np.tanh(_clip(x))),
+    "relu":     lambda x: max(0.0, _clip(x)),
+    "leaky":    lambda x: _clip(x) if _clip(x) >= 0 else 0.01 * _clip(x),
+    "identity": lambda x: _clip(x),
+    "gauss":    lambda x: float(np.exp(-_clip(x, -10.0, 10.0) ** 2)),
+    "sin":      lambda x: float(np.sin(_clip(x))),
 }
 
 

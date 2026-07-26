@@ -29,7 +29,7 @@ scipy
 #   ROCm 5.7:   cupy-rocm-5-0
 # Uncomment the one matching your system:
 # cupy-cuda12x
-# cupy-cuda11x
+cupy-cuda11x
 
 # -- GPU deep learning backend (optional - enables torch-based fitness fns) ----
 # CPU-only torch is included by default; override with --extra-index-url above

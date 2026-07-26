@@ -8,6 +8,7 @@ MODE = "watch_only" watch a random population, no evolution
 
 import numpy as np
 from neat import NEATConfig, NEATSimulator
+from sound_system import SoundAgentEnv, SoundField, SOUND_INPUTS, SOUND_OUTPUTS
 from neat_network import Network
 from neat_genome import Genome
 
@@ -20,16 +21,18 @@ MODE = "watch"   # "train" | "watch" | "watch_only"
 # Inputs:  observation from your environment (size = cfg.n_inputs)
 # Outputs: network actions              (size = cfg.n_outputs)
 # Returns: float — higher is better
+shared_field = SoundField()
 
 def my_fitness_fn(genome: Genome) -> float:
-    from visualiser import AgentEnv
-    import pygame
+    # from visualiser import AgentEnv
+    # env = AgentEnv(np.random.default_rng(0), goals=[], obstacles=[])
     net = Network.from_genome(genome)
-    env = AgentEnv(np.random.default_rng(0), goals=[], obstacles=[])
+    env = SoundAgentEnv(np.random.default_rng(0), goals=[], obstacles=[], field=shared_field, genome_id=genome.genome_id, hear_self=False)
     obs = env.reset()
     net.reset()
     total = 0.0
     for _ in range(200):
+        shared_field.step(1.0 / 60.0)
         action = net.activate(obs, n_passes=2)
         obs, reward, done = env.step(action)
         total += reward
@@ -42,17 +45,18 @@ def my_fitness_fn(genome: Genome) -> float:
 #  CONFIG
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 cfg = NEATConfig(
-    n_inputs  = 6,          # must match env observation size
-    n_outputs = 2,          # must match env action size
+    n_inputs  = 6 + SOUND_INPUTS,         # must match env observation size
+    n_outputs = 2 + SOUND_OUTPUTS,        # must match env action size
     output_activation  = "sigmoid",
-    initial_connection = "partial",
+    initial_connection = "none",
     allow_recurrent    = True,
 
     population_size     = 250,
     elitism_per_species = 1,
 
-    weight_mutate_rate    = 0.8,
+    weight_mutate_rate    = 0.68,
     weight_replace_rate   = 0.1,
     weight_perturb_std    = 0.3,
     bias_mutate_rate      = 0.3,
@@ -61,14 +65,14 @@ cfg = NEATConfig(
     toggle_rate           = 0.01,
     activation_mutate_rate = 0.01,
 
-    crossover_rate     = 0.75,
-    disable_gene_prob  = 0.75,
+    crossover_rate     = 0.5,
+    disable_gene_prob  = 0.7,
 
-    compatibility_threshold = 3.0,
+    compatibility_threshold = 1.4,
     stagnation_limit   = 15,
-    survival_ratio     = 0.5,
+    survival_ratio     = 0.35,
 
-    max_generations    = 200,
+    max_generations    = 300,
     fitness_threshold  = None,
 
     verbose      = True,
@@ -84,10 +88,51 @@ cfg = NEATConfig(
 if __name__ == "__main__":
 
     if MODE == "train":
-        sim    = NEATSimulator(cfg, fitness_fn=my_fitness_fn)
-        result = sim.run()
-        print(result.summary())
-        result.plot(save_path="neat_results.png", show=True)
+        from neat_genome import make_genome, InnovationTracker
+        
+        tracker    = InnovationTracker()
+        rng        = np.random.default_rng(cfg.seed)
+        population = [make_genome(i + 1, cfg.n_inputs, cfg.n_outputs,
+                                  tracker, rng, cfg.output_activation,
+                                  cfg.initial_connection)
+                      for i in range(cfg.population_size)]
+
+        sim = NEATSimulator(cfg)
+        best_fit = -np.inf
+
+        for gen in range(cfg.max_generations):
+            # 1. Create one shared world for this generation
+            gen_field = SoundField()
+            
+            # 2. Spawn all agents into the same world at the same time
+            agents = []
+            for genome in population:
+                net = Network.from_genome(genome)
+                env = SoundAgentEnv(rng, goals=[], obstacles=[], field=gen_field, genome_id=genome.genome_id)
+                agents.append({"genome": genome, "net": net, "env": env, "obs": env.reset()})
+                net.reset()
+
+            # 3. Tick them simultaneously so they can hear each other!
+            for step in range(200):
+                gen_field.step(1.0 / 60.0) # Advance global time once per frame
+                
+                for a in agents:
+                    if not a["env"].done:
+                        action = a["net"].activate(a["obs"], n_passes=2)
+                        a["obs"], reward, done = a["env"].step(action)
+                        a["genome"].fitness = getattr(a["genome"], 'fitness', 0.0) + reward
+
+            # 4. Standard NEAT bookkeeping
+            gen_best = max(population, key=lambda g: g.fitness)
+            if gen_best.fitness > best_fit:
+                best_fit = gen_best.fitness
+
+            print(f"[Gen {gen+1:>3}]  best={gen_best.fitness:.4f}")
+
+            tracker.new_generation()
+            sim.speciator.speciate(population, rng)
+            sim.speciator.cull(cfg.survival_ratio)
+            population = sim._reproduce(population)
 
     elif MODE == "watch_only":
         from visualiser import NEATVisualiser
@@ -98,7 +143,7 @@ if __name__ == "__main__":
                            tracker, rng, cfg.output_activation,
                            cfg.initial_connection)
                for i in range(cfg.population_size)]
-        vis = NEATVisualiser(pop, n_inputs=cfg.n_inputs, n_outputs=cfg.n_outputs,
+        vis = NEATVisualiser(pop, _field=shared_field, n_inputs=cfg.n_inputs,  n_outputs=cfg.n_outputs,
                              steps_per_gen=300, fps_target=60)
         vis.run()
 
@@ -115,6 +160,7 @@ if __name__ == "__main__":
 
         vis = NEATVisualiser(
             population,
+            _field=shared_field,
             n_inputs      = cfg.n_inputs,
             n_outputs     = cfg.n_outputs,
             steps_per_gen = 300,
